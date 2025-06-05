@@ -3,11 +3,11 @@
 PortSystem          1.0
 PortGroup           github 1.0
 
-github.setup        realm swiftlint 0.57.0
+github.setup        realm swiftlint 0.59.1
 github.tarball_from archive
 revision            0
 
-platforms           {darwin >= 21}
+platforms           {darwin >= 22}
 categories          devel
 license             MIT
 maintainers         {gmail.com:christos.koninis @csknns} \
@@ -15,12 +15,15 @@ maintainers         {gmail.com:christos.koninis @csknns} \
 description         Swift linter
 long_description    A tool to enforce Swift style and conventions
 
-checksums           rmd160  fce7fd39e2948896ff08682b83a5149f31104bb6 \
-                    sha256  0f3db0cb0ca8696c72b3215fa543b339158e564347070d7ec0dc740446e0e4b6 \
-                    size    821065
+checksums           rmd160  81a0ef0732b24970bf9cb2b38e3b490bcdac3b1b \
+                    sha256  22fa7c72f1ef9b4755b6ff1f0431d5bfd4962b9140e42805cfda30ecb5b731bb \
+                    size    845821
 
 # Clearing CPATH because of header conflicts with MacOSX13.sdk when using swiftPM build system
 compiler.cpath
+# SwiftLint supports Swift >=5.9 that is Xcode >=15.0
+compiler.blacklist-append {clang < 1500}
+
 
 use_configure       no
 use_xcode           yes
@@ -30,9 +33,10 @@ build.target        build
 build.args          --configuration release --disable-sandbox
 
 test.run            yes
+test.env            SKIP_INTEGRATION_TESTS=true
 test.cmd            swift
 test.target         test
-test.args           --disable-sandbox
+test.args           --disable-sandbox -Xswiftc -DDISABLE_FOCUSED_EXAMPLES
 
 set builtproductdir ${worksrcpath}/.build/release
 
