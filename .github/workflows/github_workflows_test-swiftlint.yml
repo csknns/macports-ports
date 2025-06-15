@@ -1,43 +1,41 @@
 name: "Test SwiftLint Port"
 
 on:
-    workflow_dispatch:
+  workflow_dispatch:
     inputs:
-        test_only:
+      test_only:
         description: 'Run tests only (skip build)'
         required: false
         default: false
         type: boolean
-    push:
-    paths:
-        - 'devel/swiftlint/**'
+  push:
     branches-ignore:
-        - master
-    pull_request:
+      - master
+  pull_request:
     paths:
-        - 'devel/swiftlint/**'
+      - 'devel/swiftlint/**'
 
 permissions:
-    contents: read
+  contents: read
 
 jobs:
-    test-swiftlint:
+  test-swiftlint:
     name: Test SwiftLint on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
-        fail-fast: false
-        matrix:
+      fail-fast: false
+      matrix:
         os: [macos-14, macos-15]
 
     steps:
-        - name: Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-            fetch-depth: 1
-            show-progress: false
+          fetch-depth: 1
+          show-progress: false
 
-        - name: Check Xcode version
+      - name: Check Xcode version
         id: xcode-check
         run: |
           echo "=== Xcode Version Check ==="
@@ -60,55 +58,55 @@ jobs:
           echo "SDK Path: $(xcrun --show-sdk-path)"
           echo "Developer Dir: $(xcode-select -p)"
 
-- name: Setup MacPorts environment
-    if: steps.xcode-check.outputs.xcode_compatible == 'true'
-    run: |
-    echo "=== Setting up MacPorts Environment ==="
+      - name: Setup MacPorts environment
+        if: steps.xcode-check.outputs.xcode_compatible == 'true'
+        run: |
+          echo "=== Setting up MacPorts Environment ==="
 
-    # Add MacPorts to PATH
-    echo "/opt/local/bin" >> $GITHUB_PATH
-    echo "/opt/local/sbin" >> $GITHUB_PATH
+          # Add MacPorts to PATH
+          echo "/opt/local/bin" >> $GITHUB_PATH
+          echo "/opt/local/sbin" >> $GITHUB_PATH
 
-    # Install MacPorts if not present
-    if ! command -v port &> /dev/null; then
-        echo "Installing MacPorts..."
+          # Install MacPorts if not present
+          if ! command -v port &> /dev/null; then
+            echo "Installing MacPorts..."
 
-        # Determine macOS version for MacPorts installer
-        MACOS_FULL_VERSION=$(sw_vers -productVersion)
-        MACOS_MAJOR=$(echo $MACOS_FULL_VERSION | cut -d. -f1)
-        echo "macOS version: $MACOS_FULL_VERSION (major: $MACOS_MAJOR)"
+            # Determine macOS version for MacPorts installer
+            MACOS_FULL_VERSION=$(sw_vers -productVersion)
+            MACOS_MAJOR=$(echo $MACOS_FULL_VERSION | cut -d. -f1)
+            echo "macOS version: $MACOS_FULL_VERSION (major: $MACOS_MAJOR)"
 
-        # Map macOS versions to MacPorts package names
-        case $MACOS_MAJOR in
-        15)
-            MACPORTS_PKG="MacPorts-2.10.1-15-Sequoia.pkg"
-            ;;
-        14)
-            MACPORTS_PKG="MacPorts-2.10.1-14-Sonoma.pkg"
-            ;;
-        13)
-            MACPORTS_PKG="MacPorts-2.10.1-13-Ventura.pkg"
-            ;;
-        *)
-            echo "Unsupported macOS version: $MACOS_MAJOR"
-            exit 1
-            ;;
-        esac
+            # Map macOS versions to MacPorts package names
+            case $MACOS_MAJOR in
+              15)
+                MACPORTS_PKG="MacPorts-2.10.1-15-Sequoia.pkg"
+                ;;
+              14)
+                MACPORTS_PKG="MacPorts-2.10.1-14-Sonoma.pkg"
+                ;;
+              13)
+                MACPORTS_PKG="MacPorts-2.10.1-13-Ventura.pkg"
+                ;;
+              *)
+                echo "Unsupported macOS version: $MACOS_MAJOR"
+                exit 1
+                ;;
+            esac
 
-        echo "Using MacPorts package: $MACPORTS_PKG"
+            echo "Using MacPorts package: $MACPORTS_PKG"
 
-        # Download and install MacPorts
-        curl -LO "https://github.com/macports/macports-base/releases/download/v2.10.1/$MACPORTS_PKG"
-        sudo installer -pkg "$MACPORTS_PKG" -target /
+            # Download and install MacPorts
+            curl -LO "https://github.com/macports/macports-base/releases/download/v2.10.1/$MACPORTS_PKG"
+            sudo installer -pkg "$MACPORTS_PKG" -target /
 
-        # Update MacPorts
-        sudo port selfupdate
-    else
-        echo "MacPorts already installed"
-        port version
-    fi
+            # Update MacPorts
+            sudo port selfupdate
+          else
+            echo "MacPorts already installed"
+            port version
+          fi
 
-        - name: Install port from local Portfile
+      - name: Install port from local Portfile
         if: steps.xcode-check.outputs.xcode_compatible == 'true'
         run: |
           echo "=== Installing SwiftLint port ==="
@@ -127,14 +125,14 @@ jobs:
           # Install the port
           sudo port -v install swiftlint
 
-        - name: Run port lint
+      - name: Run port lint
         if: steps.xcode-check.outputs.xcode_compatible == 'true'
         continue-on-error: true
         run: |
           echo "=== Running Port Lint ==="
           sudo port lint --nitpick swiftlint || true
 
-        - name: Run port test
+      - name: Run port test
         if: steps.xcode-check.outputs.xcode_compatible == 'true' && !inputs.test_only
         id: port-test
         run: |
@@ -151,7 +149,7 @@ jobs:
           # Run tests with verbose output
           sudo -E port -v test swiftlint
 
-        - name: Collect build logs
+      - name: Collect build logs
         if: always() && steps.xcode-check.outputs.xcode_compatible == 'true'
         run: |
           echo "=== Collecting Build Logs ==="
@@ -169,16 +167,16 @@ jobs:
             find /opt/local/var/macports/logs -name "*.log" 2>/dev/null || echo "No log files found"
           fi
 
-        - name: Upload build artifacts
+      - name: Upload build artifacts
         if: always() && steps.xcode-check.outputs.xcode_compatible == 'true'
         uses: actions/upload-artifact@v4
         with:
-            name: swiftlint-logs-${{ matrix.os }}
-            path: |
+          name: swiftlint-logs-${{ matrix.os }}
+          path: |
             /opt/local/var/macports/logs/**/*.log
-            retention-days: 7
+          retention-days: 7
 
-        - name: Test summary
+      - name: Test summary
         if: always()
         run: |
           echo "=== Test Summary ==="
