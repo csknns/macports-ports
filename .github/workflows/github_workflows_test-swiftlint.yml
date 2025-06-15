@@ -1,0 +1,176 @@
+name: "Test SwiftLint Port"
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_only:
+        description: 'Run tests only (skip build)'
+        required: false
+        default: false
+        type: boolean
+  push:
+    paths:
+      - 'devel/swiftlint/**'
+    branches-ignore:
+      - master
+  pull_request:
+    paths:
+      - 'devel/swiftlint/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test-swiftlint:
+    name: Test SwiftLint on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+        
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          show-progress: false
+
+      - name: Check Xcode version
+        id: xcode-check
+        run: |
+          echo "=== Xcode Version Check ==="
+          xcodebuild -version
+          
+          # Extract major version number
+          XCODE_VERSION=$(xcodebuild -version | head -n1 | sed -E 's/Xcode ([0-9]+).*/\1/')
+          echo "Detected Xcode major version: $XCODE_VERSION"
+          echo "xcode_major_version=$XCODE_VERSION" >> $GITHUB_OUTPUT
+          
+          if [ "$XCODE_VERSION" -lt 16 ]; then
+            echo "❌ Xcode 16+ required for SwiftLint tests (found Xcode $XCODE_VERSION)"
+            echo "xcode_compatible=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Xcode $XCODE_VERSION is compatible"
+            echo "xcode_compatible=true" >> $GITHUB_OUTPUT
+          fi
+          
+          # Show SDK path
+          echo "SDK Path: $(xcrun --show-sdk-path)"
+          echo "Developer Dir: $(xcode-select -p)"
+
+      - name: Setup MacPorts environment
+        if: steps.xcode-check.outputs.xcode_compatible == 'true'
+        run: |
+          echo "=== Setting up MacPorts Environment ==="
+          
+          # Add MacPorts to PATH
+          echo "/opt/local/bin" >> $GITHUB_PATH
+          echo "/opt/local/sbin" >> $GITHUB_PATH
+          
+          # Install MacPorts if not present
+          if ! command -v port &> /dev/null; then
+            echo "Installing MacPorts..."
+            
+            # Determine macOS version for MacPorts installer
+            MACOS_VERSION=$(sw_vers -productVersion | cut -d. -f1-2)
+            echo "macOS version: $MACOS_VERSION"
+            
+            # Download and install MacPorts
+            curl -LO "https://github.com/macports/macports-base/releases/download/v2.10.1/MacPorts-2.10.1-${MACOS_VERSION}.pkg"
+            sudo installer -pkg "MacPorts-2.10.1-${MACOS_VERSION}.pkg" -target /
+            
+            # Update MacPorts
+            sudo port selfupdate
+          else
+            echo "MacPorts already installed"
+            port version
+          fi
+
+      - name: Install port from local Portfile
+        if: steps.xcode-check.outputs.xcode_compatible == 'true'
+        run: |
+          echo "=== Installing SwiftLint port ==="
+          
+          # Create a temporary portfile directory
+          TEMP_PORTDIR=$(mktemp -d)
+          cp -r devel/swiftlint "$TEMP_PORTDIR/"
+          
+          # Add the temporary directory to MacPorts
+          echo "file://$TEMP_PORTDIR [default]" | sudo tee /opt/local/etc/macports/sources.conf
+          
+          # Update port index
+          cd "$TEMP_PORTDIR"
+          sudo portindex
+          
+          # Install the port
+          sudo port -v install swiftlint
+
+      - name: Run port lint
+        if: steps.xcode-check.outputs.xcode_compatible == 'true'
+        continue-on-error: true
+        run: |
+          echo "=== Running Port Lint ==="
+          sudo port lint --nitpick swiftlint || true
+
+      - name: Run port test
+        if: steps.xcode-check.outputs.xcode_compatible == 'true' && !inputs.test_only
+        id: port-test
+        run: |
+          echo "=== Running SwiftLint Port Tests ==="
+          
+          # Set environment variables for Swift build
+          export SDKROOT=$(xcrun --show-sdk-path)
+          export DEVELOPER_DIR=$(xcode-select -p)
+          
+          echo "SDKROOT: $SDKROOT"
+          echo "DEVELOPER_DIR: $DEVELOPER_DIR"
+          echo "Swift version: $(swift --version)"
+          
+          # Run tests with verbose output
+          sudo -E port -v test swiftlint
+
+      - name: Collect build logs
+        if: always() && steps.xcode-check.outputs.xcode_compatible == 'true'
+        run: |
+          echo "=== Collecting Build Logs ==="
+          
+          # Find and display the main log
+          LOG_PATH="/opt/local/var/macports/logs/_opt_local_var_macports_sources_rsync.macports.org_macports_release_tarballs_ports_devel_swiftlint/swiftlint/main.log"
+          
+          if [ -f "$LOG_PATH" ]; then
+            echo "Main log found at: $LOG_PATH"
+            echo "=== Last 100 lines of main.log ==="
+            tail -n 100 "$LOG_PATH"
+          else
+            echo "Main log not found at expected path"
+            echo "Available log files:"
+            find /opt/local/var/macports/logs -name "*.log" 2>/dev/null || echo "No log files found"
+          fi
+
+      - name: Upload build artifacts
+        if: always() && steps.xcode-check.outputs.xcode_compatible == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: swiftlint-logs-${{ matrix.os }}
+          path: |
+            /opt/local/var/macports/logs/**/*.log
+          retention-days: 7
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "=== Test Summary ==="
+          echo "OS: ${{ matrix.os }}"
+          echo "Xcode Compatible: ${{ steps.xcode-check.outputs.xcode_compatible }}"
+          echo "Xcode Version: ${{ steps.xcode-check.outputs.xcode_major_version }}"
+          
+          if [ "${{ steps.xcode-check.outputs.xcode_compatible }}" = "false" ]; then
+            echo "❌ Skipped tests due to incompatible Xcode version"
+            echo "SwiftLint requires Xcode 16+ for testing due to Swift Testing framework requirements"
+          elif [ "${{ steps.port-test.outcome }}" = "success" ]; then
+            echo "✅ SwiftLint port tests passed"
+          else
+            echo "❌ SwiftLint port tests failed - check logs above"
+          fi

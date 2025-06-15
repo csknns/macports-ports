@@ -8,6 +8,7 @@ github.tarball_from archive
 revision            0
 
 platforms           {darwin >= 22}
+depends_build       port:swift-tools-support-core
 categories          devel
 license             MIT
 maintainers         {gmail.com:christos.koninis @csknns} \
